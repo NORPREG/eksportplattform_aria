@@ -1,0 +1,14 @@
+[conquest]
+sql_uri = ""
+dgate_exe = ""
+aet = ""
+
+[aria]
+sql_uri = ""
+aet = ""
+
+[patient_list]
+sql_uri = ""
+
+[krest]
+aet = ""
