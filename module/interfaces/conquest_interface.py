@@ -4,7 +4,7 @@ from configparser import ConfigParser
 import shlex
 import subprocess
 
-from module.dataclasses.conquest_dataclass import (
+from module.dataclass.conquest_dataclass import (
 	DICOMImages, 
 	DICOMPatients,
 )
@@ -17,186 +17,105 @@ config = Config()
 
 logger = logging.getLogger(__name__ + f" (config.HF)")
 
-"""
-Interface code for interacting with the Conquest DATABASE.
-It is also possible to speak DICOM with Conquest, but it's
-far easier to access the database directly.
-The config object contains the authentication information.
 
-In addition, some of the function use the dgate.exe
-executable, e.g. to move studies from staging to registry.
-"""
+# Conquest SQL Interface | Datamodel
 
+def check_rtdose_beam_or_plansum_sql(rtdose_series_uid_list):
+	rtdose_files = list()
+	rtdose_output = list()
 
-def get_conquest_data_dir():
-	ini_file = config.conquest.stg.app_dir / "dicom.ini"
-	parsed_ini = ConfigParser()
-	parsed_ini.read(ini_file)
+	with Session(engine) as session:
+		for rtdose_series_uid in rtdose_series_uid_list:
+			statement = select(DICOMImages).where(DICOMImages.SeriesInst == rtdose_series_uid)
+			results = session.exec(statement).all()
 
-	# The SSCSCP section is the only one defined in the .ini
-	# Although the file itself should be sectioned better
-	data_dir = Path(parsed_ini['sscscp']['MAGDevice0'])
+			for result in results:
+				rtdose_files.append(ROOT_DIR + result.ObjectFile)
 
-	return data_dir
+	for f in rtdose_files:
+		ds = pydicom.dcmread(f, stop_before_pixels=True)
+		rtdose_output.append({
+			"SOPInstanceUID": ds.SOPInstanceUID,
+			"SeriesInstanceUID": ds.SeriesInstanceUID,
+			"Modality": ds.Modality,
+			"PatientID": ds.PatientID,
+			"DoseSummationType": ds.DoseSummationType,
+			"ReferencedRTlanSOPInstanceUID": [ k.ReferencedSOPInstanceUID for k in ds.ReferencedRTPlanSequence ]
+		})
 
-def get_conquest_database_file():
-	ini_file = config.conquest.stg.app_dir / "dicom.ini"
-	print(ini_file)
-	parsed_ini = ConfigParser()
-	parsed_ini.read(ini_file)
+	return rtdose_output
 
-	print(parsed_ini)
+def get_rt_struct_uid_sql(plan_sop_uid):
+	with Session(engine) as session:
+		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == plan_sop_uid)
+		result = session.exec(statement)
+		try:
+			ds_path = ROOT_DIR + result.one().ObjectFile
+		except Exception as e:
+			print("Cannot find structure files! ", e)
+			return list()
 
-	db_file = Path(parsed_ini['sscscp']['SQLServer'])
-	return db_file
-
-def fetch_patients_from_conquest(session) -> DICOMPatients:
-	statement = select(DICOMPatients)
-	try:
-		results = session.exec(statement)
-		return results
-	except Exception as e:
-		logging.error(f"Error in fetching patients from the Staging Conquest: {e}")
-		return DICOMPatients()
-
-
-def fetch_study_uids_from_conquest(patient) -> list:
-	UIDs = set()
-	for study in patient.studies:
-		UIDs.add(study.StudyInstanceUID)
-	return list(UIDs)
-
-
-def fetch_series_uids_from_conquest(patient) -> list:
-	UIDs = set()
-	for study in patient.studies:
-		for series in study.series:
-			UIDs.add(series.SeriesInstanceUID)
-	return list(UIDs)
-
-
-def calculate_md5sum(session, series_uid=None, patient=None) -> str:
-	data_dir = get_conquest_data_dir()
+	ds = pydicom.dcmread(ds_path)
+	structure_sets = list()
+	for seq in ds.ReferencedStructureSetSequence:
+		structure_sets.append(seq.ReferencedSOPInstanceUID)
 	
-	if patient:
-		files = fetch_file_list(session, patient=patient)
-	elif series_uid:
-		files = fetch_file_list(session, series_uid=series_uid)
-	else:
-		files = fetch_file_list(session)
-	data = b''
-	for file in files:
-		with open(data_dir + file, 'rb') as file_to_check:
-			data += file_to_check.read()
+	if len(structure_sets) != 1:
+		print(f"-----------  {len(structure_sets) = } --------- ")
 
-	md5 = hashlib.md5(data).hexdigest()
-
-	logging.info(f"The md5sum of the whole DICOM dataset is {md5}.")
-
-	return md5
+	return structure_sets, ds.get("RTPlanLabel")
 
 
-def fetch_file_list(session, series_uid=None, patient=None) -> list:
-	if series_uid:
-		statement = select(DICOMImages).where(DICOMImages.SeriesInst == series_uid)
-	elif patient:
-		statement = select(DICOMImages).where(DICOMImages.ImagePat == patient.PatientID)
-	else:
-		statement = select(DICOMImages)
-	results = session.exec(statement)
-	file_list = list()
-	for file_object in results:
-		file_list.append(file_object.ObjectFile)
+def get_patient_id_from_plan_sop_uid(plan_sop_uid: str) -> str:
+	with Session(engine) as session:
+		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == plan_sop_uid)
+		result = session.exec(statement).all()
 
-	return sorted(file_list)
+		if not result:
+			return None
 
-def get_file_tree(patient: DICOMPatients) -> dict():	
-	supported_modalities = ['CT', 'MR', 'RTPLAN', 'RTDOSE', 'RTSTRUCT', 'RTRECORD']
-	modalities = set()
-	basepath = get_conquest_data_dir()
+		return result[0].ImagePat
 
-	file_tree = { k: list() for k in supported_modalities }
-	unsupported_modalities = set()
 
-	for study in patient.studies:
-		for series in study.series:
-			modalities.add(series.Modality)
-			if series.Modality not in file_tree:
-				unsupported_modalities.add(series.Modality)
-				# logging.warning(f"Modality not supported: {series.Modality}")
-				continue
+def find_referenced_ct_series_sql(rtstruct_instance_uid):
+	with Session(engine) as session:
+		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == rtstruct_instance_uid)
+		result = session.exec(statement)
+		try:
+			ds_path = ROOT_DIR + result.one().ObjectFile
+		except Exception as e:
+			print("Cannot find CT series: ", e)
+			return None
+
+	ct_series_uid = set()
+	ds = pydicom.dcmread(ds_path)
+	for ref_frame_of_reference_seq in ds.ReferencedFrameOfReferenceSequence:
+		for rt_ref_study_seq in ref_frame_of_reference_seq.RTReferencedStudySequence:
+			for rt_ref_series_seq in rt_ref_study_seq.RTReferencedSeriesSequence:
+				ct_series_uid.add(rt_ref_series_seq.SeriesInstanceUID)
+
 	
-			for image in series.images:			
-				file_tree[series.Modality].append(basepath / image.ObjectFile)
+	if len(ct_series_uid) != 1:
+		print(f"-----------  {len(ct_series_uid) = } --------- ")
 
-	if len(unsupported_modalities):
-		mod_list = ",".join(list(unsupported_modalities))
-		logging.warning(f"Modalities not supported: {mod_list}")
+	return ct_series_uid
 
-	return file_tree
+def find_referenced_plan_uid_from_rt_dose_sql(rt_dose_uid):
+	with Session(engine) as session:
+		statement = select(DICOMImages).where(DICOMImages.SeriesInst == rt_dose_uid)
+		result = session.exec(statement)
+		try:
+			ds_path = ROOT_DIR + result.one().ObjectFile
+		except:
+			return list()
 
-def move_to_registry(pat_id):
-	"""Run dgate.exe to move patient to registry Conquest
+	plan_uid = list()
 
-		dgate64 --movepatient:source_aet,dest_aet,pat_id"""
-		
-	executable = config.conquest.stg.app_exe
-	source_aet = config.conquest.stg.aet
-	dest_aet = config.conquest.reg.aet
+	ds = pydicom.dcmread(ds_path, stop_before_pixels=True)
+	for seq in ds.ReferencedRTPlanSequence:
+		plan_uid.append(seq.ReferencedSOPInstanceUID)
 
-	if not pat_id.isalnum():
-		logger.error(f"Invalid input: Patient ID must be alphanumeric for patient {pat_id}")
-		raise ValueError("Invalid input: Patient ID must be alphanumeric")
+	if len(plan_uid) != 1:
+		print(f"-----------  {len(plan_uid) = } --------- ")
 
-	pat_id_safe = shlex.quote(pat_id)
-
-	if pat_id_safe != pat_id:
-		"""Should never happen due to isalnum, but still a failsafe"""
-
-		logger.error(f"Dangerous patient_id according to shlex: {pat_id}")
-		return
-
-	command_to_run = [
-		executable, 
-		f"--movepatient:{source_aet},{dest_aet},{pat_id_safe}"
-	]
-
-	try:
-		subprocess.run(command_to_run, check=True)
-		logging.info("Successfully moved {pat_id} from {source_aet} to {dest_aet}")
-
-	except subprocess.CalledProcessError as e:
-		logging.error(f"Error executing command: {e}")
-
-
-def delete_from_staging(pat_id):
-	"""Run dgate.exe to move patient to registry Conquest
-
-		dgate64 --movepatient:source_aet,dest_aet,pat_id"""
-		
-	executable = config.conquest.stg.app_exe
-	source_aet = config.conquest.stg.aet
-
-	if not pat_id.isalnum():
-		logger.error(f"Invalid input: Patient ID must be alphanumeric for patient {pat_id}")
-		raise ValueError("Invalid input: Patient ID must be alphanumeric")
-
-	pat_id_safe = shlex.quote(pat_id)
-
-	if pat_id_safe != pat_id:
-		"""Should never happen due to isalnum, but still a failsafe"""
-
-		logger.error(f"Dangerous patient_id according to shlex: {pat_id}")
-		return
-
-	command_to_run = [
-		executable, 
-		f"--deletepatient:{pat_id_safe}"
-	]
-
-	try:
-		subprocess.run(command_to_run, check=True)
-		logging.info("Successfully deleted {pat_id} from {source_aet}")
-
-	except subprocess.CalledProcessError as e:
-		logging.error(f"Error executing command: {e}")
+	return plan_uid

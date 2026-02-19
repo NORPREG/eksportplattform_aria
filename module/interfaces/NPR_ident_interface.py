@@ -1,6 +1,6 @@
 import pathlib
 
-from module.dataclasses.NPR_ident_dataclass import NPRIdent
+from module.dataclass.NPR_ident_dataclass import NPRIdent
 
 """
 The NPR Ident file contains the fødselsnummer of the patient 

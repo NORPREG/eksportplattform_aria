@@ -1,1 +1,0 @@
-# Fetch files from patient_list from Aria to Conquest

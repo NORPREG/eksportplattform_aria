@@ -1,14 +1,14 @@
 [conquest]
-sql_uri = ""
-dgate_exe = ""
-aet = ""
+sql_uri = "sqlite:///D:/Conquest/MEDFYSHUS6666-1/data/dbase/conquest.db3"
+dgate_exe = "D:/Conquest/MEDFYSHUS6666-1/dgate64.exe"
+aet = "MEDFYSHUS6666-1"
 
 [aria]
-sql_uri = ""
-aet = ""
+sql_uri = "mssql+pyodbc://VIR-APP5338/localrtdb?driver=SQL+Server"
+aet = "VMSDBD"
 
 [patient_list]
 sql_uri = ""
 
 [krest]
-aet = ""
+aet = "GW_HUS"

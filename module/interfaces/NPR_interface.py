@@ -1,10 +1,10 @@
 import pathlib
 import numpy as np
 
-from module.dataclasses import NPR_dataclass
-from module.dataclasses.ICD10 import ICD10
-from module.dataclasses.Region import Region
-from module.dataclasses.NKPK import NKPK
+from module.dataclass import NPR_dataclass
+from module.dataclass.ICD10 import ICD10
+from module.dataclass.Region import Region
+from module.dataclass.NKPK import NKPK
 
 
 """

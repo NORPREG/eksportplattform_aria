@@ -19,6 +19,8 @@ data = pd.read_sql_query(sql, engine)
 
 study_uids = list(data.StudyUID)
 
+print(study_uids)
+
 #os.chdir("D:/Conquest/MEDFYSHUS6666-1/")
 #app_exe = "dgate64.exe"
 #arg = f"--movestudy:VMSDBD,MEDFYSHUS6666-1,:{study_uid}"
