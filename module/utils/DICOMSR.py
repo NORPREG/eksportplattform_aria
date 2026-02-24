@@ -7,7 +7,7 @@ from pydicom.sr.codedict import codes
 from pydicom.uid import generate_uid, UID
 
 
-class DICOMInterface:
+class DICOMSR:
    explicitVR = UID("1.2.840.10008.1.2.1")
    basicTextSRStorage = UID("1.2.840.10008.5.1.4.1.1.88.11")
    pythonClassUID = UID("1.2.826.0.1.3680043.8.498.1")

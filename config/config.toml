@@ -1,14 +1,36 @@
 [conquest]
-sql_uri = "sqlite:///D:/Conquest/MEDFYSHUS6666-1/data/dbase/conquest.db3"
-dgate_exe = "D:/Conquest/MEDFYSHUS6666-1/dgate64.exe"
+[conquest.1]
+[conquest.1.sql]
+mysql_uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_1"
+
+[conquest.1.dicom]
 aet = "MEDFYSHUS6666-1"
+server = "127.0.0.1"
+port = 57863
+
+[conquest.2]
+[conquest.2.sql]
+mysql_uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_2"
+data_dir = "D:/Conquest/MEDFYSHUS6666-2/data"
+
+[conquest.2.dicom]
+aet = "MEDFYSHUS6666-2"
+server = "127.0.0.1"
+port = 31416
 
 [aria]
-sql_uri = "mssql+pyodbc://VIR-APP5338/localrtdb?driver=SQL+Server"
-aet = "VMSDBD"
+[aria.sql]
+uri = "mssql+pyodbc://VIR-APP5338/localrtdb?driver=SQL+Server"
 
-[patient_list]
-sql_uri = ""
+[aria.dicom]
+aet = "VMSDBD"
+port = 57347
+server = "VIR-APP5340"
+
+[log_db]
+sql_uri = "mssql+pyodbc://AGBGODNCA2/ProtonRegister_prod?driver=SQL+Server"
 
 [krest]
 aet = "GW_HUS"
+port = 31416
+server = "10.53.252.160"

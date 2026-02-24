@@ -40,7 +40,7 @@ def blp_GetTxRecordsProtonToExport(from_dt: datetime = None) -> List[TxRecordsPr
 
 		return [TxRecordsProtonToExport(**dict(row)) for row in rows]
 
-def find_rtplans_from_sql():
+def get_plan_set():
 	rtrecords = blp_GetTxRecordsProtonToExport()
 	plan_set = dict()
 
@@ -60,3 +60,4 @@ def find_rtplans_from_sql():
 		plan_set[rtrecord.PatientSer]["RTRECORD"].add(rtrecord.TreatmentRecordUID)
 
 	return plan_set
+

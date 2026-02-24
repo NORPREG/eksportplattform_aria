@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__ + f" (config.HF)")
 
 # Conquest SQL Interface | Datamodel
 
-def check_rtdose_beam_or_plansum_sql(rtdose_series_uid_list):
+def check_rtdose_beam_or_plansum(rtdose_series_uid_list):
 	rtdose_files = list()
 	rtdose_output = list()
 
@@ -45,7 +45,7 @@ def check_rtdose_beam_or_plansum_sql(rtdose_series_uid_list):
 
 	return rtdose_output
 
-def get_rt_struct_uid_sql(plan_sop_uid):
+def get_rt_struct_uid(plan_sop_uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == plan_sop_uid)
 		result = session.exec(statement)
@@ -77,7 +77,7 @@ def get_patient_id_from_plan_sop_uid(plan_sop_uid: str) -> str:
 		return result[0].ImagePat
 
 
-def find_referenced_ct_series_sql(rtstruct_instance_uid):
+def find_referenced_ct_series(rtstruct_instance_uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == rtstruct_instance_uid)
 		result = session.exec(statement)
@@ -119,3 +119,21 @@ def find_referenced_plan_uid_from_rt_dose_sql(rt_dose_uid):
 		print(f"-----------  {len(plan_uid) = } --------- ")
 
 	return plan_uid
+
+def check_exists_sop(uid):
+	with Session(engine) as session:
+		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == uid)
+		result = session.exec(statement)
+		if result.first() is not None:
+			return True
+	
+	return False
+
+def check_exists_series(uid):	
+	with Session(engine) as session:
+		statement = select(DICOMSeries).where(DICOMSeries.SeriesInstanceUID == uid)
+		result = session.exec(statement)
+		if result.first() is not None:
+			return True
+	
+	return False
