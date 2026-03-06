@@ -1,26 +1,27 @@
-[conquest]
-[conquest.1]
-[conquest.1.sql]
-mysql_uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_1"
+[conquest_aria]
+root_dir = "D:/Conquest/MEDFYSHUS6666-1/data/"
 
-[conquest.1.dicom]
+[conquest_aria.sql]
+uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_1"
+
+[conquest_aria.dicom]
 aet = "MEDFYSHUS6666-1"
 server = "127.0.0.1"
 port = 57863
 
-[conquest.2]
-[conquest.2.sql]
-mysql_uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_2"
-data_dir = "D:/Conquest/MEDFYSHUS6666-2/data"
+[conquest_krest]
+root_dir = "D:/Conquest/MEDFYSHUS6666-2/data/"
+[conquest_krest.sql]
+uri = "mysql+pymysql://root:BestefarKjeksKaffe@localhost/conquest_2"
 
-[conquest.2.dicom]
+[conquest_krest.dicom]
 aet = "MEDFYSHUS6666-2"
 server = "127.0.0.1"
 port = 31416
 
 [aria]
 [aria.sql]
-uri = "mssql+pyodbc://VIR-APP5338/localrtdb?driver=SQL+Server"
+uri = "mssql+pyodbc://VIR-APP5338/VARIAN?driver=SQL+Server"
 
 [aria.dicom]
 aet = "VMSDBD"
@@ -28,9 +29,10 @@ port = 57347
 server = "VIR-APP5340"
 
 [log_db]
-sql_uri = "mssql+pyodbc://AGBGODNCA2/ProtonRegister_prod?driver=SQL+Server"
+uri = ""
+file = "log_db/patient_log.json"
 
 [krest]
+name = "KREST-HUS"
+[krest.dicom]
 aet = "GW_HUS"
-port = 31416
-server = "10.53.252.160"

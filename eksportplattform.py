@@ -1,24 +1,31 @@
-# from module.sync_aria import fetch_plans
-# from config import Config
 import subprocess
 import os
 import tomllib
 from sqlmodel import Session, create_engine, select
 import logging
+from datetime import datetime
+from pprint import pprint
 
-from module.dataclass.conquest_dataclass import (
+from config import Config
+
+config = Config()
+
+from module.Dataclasses.conquest_dataclass import (
 	DICOMImages, 
 	DICOMPatients,
 	DICOMSeries
 )
 
-from module.interfaces import (
-	aria_interface,
-	conquest_interface
+from module.Interfaces import (
+	aria_db_interface,
+	aria_dicom_interface,
+	conquest_db_interface,
+	conquest_dicom_interface,
+	export_logger_interface
 )
 
 logging.basicConfig(
-	filename="../export.log", 
+	filename="D:/Brokers/export.log", 
 	filemode='a', 
 	format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
 	datefmt='%Y-%m-%d %H:%M:%S',
@@ -26,137 +33,135 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Plans to fetch from Aria
-# plans = fetch_plans()
+log_database = export_logger_interface.LogDatabase()
 
-fn = os.path.join(os.path.dirname(__file__), 'config/config.toml')
-with open(fn, 'rb') as f:
-    config = tomllib.load(f)
-
-# FIND RT PLANS FROM SQL
+# FIND RT PLAN, RT DOSE FROM SQL
 # BUILD COMPLETE STUDY TREE
-# DOWNLOAD RT PLANS
-# DOWNLOAD ALL RT DOSE FILES
-# FIND THE REFERENCED RT PLAN IN EACH DOSE FILE
+# DOWNLOAD RT PLANS (from SQL)
+# DOWNLOAD ALL RT DOSE FILES (from SQL)
 # FIND THE REFERENCED STRUCTURE FILES IN THE RT PLAN
 # DOWNLOAD THE STRUCTURE FILES
-# DELETE THE UNINTERESTING RT DOSE FILES
-# FIND THE REFERENCED CT FILES
+# FIND THE REFERENCED CT FILES from RT STRUCT
 # DOWNLOAD THE CONNECTED CT SERIES
 # SEND TO MEDFYSHUS6666-2
 # SEND TO KREST-HUS
 
-plan_set = aria_interface.get_plan_set()
+dt = datetime(2025, 1, 1)
+plan_set = aria_db_interface.get_plan_set(dt)
 
-print(f"Found {len(plan_set) = } patients in SQL call")
+print(f"Found {len(plan_set)} patients since {dt.isoformat()}")
 
-data_dir = config["conquest"]["2"]["data_dir"]
-transmitted = [k.split("\\")[-1] for k in glob(f"{data_dir}/*")]
+"""
+plan_set = 
+PatientSer { 
+	"PatientID",
+	"PlanSet" : {
+		RT Plan SOP UID : {
+			"RTPLAN": RT Plan SOP UID,
+			"RTPlanLabel", 
+			"RTDOSE": RT Dose SOP UID,
+			"RTSTRUCT": RT Struct SOP UID,
+			"RTRECORD": [ RT Treatment Record SOP UIDs ],
+			"CT": Plan CT Series Instance UID,
+		}
+	}
+}
+
+"""
+
+conquest_aria_engine = create_engine(config.conquest_aria.sql.uri)
+conquest_krest_engine = create_engine(config.conquest_krest.sql.uri)
+
+transmitted = conquest_db_interface.get_patient_ids(conquest_krest_engine)
 
 for patient_ser in plan_set:
-	print("Working on patient ", patient_ser)
+	print("Working on patient", patient_ser)
 	sent_dt = log_database.check_patient(patient_ser)
 
 	if sent_dt:
-		print(f"-> Patient has was transmitted at {sent_dt}")
-		continue
+		print(f"- Patient was transmitted to {config.krest.name} at {sent_dt}")
+		# continue
 
-	for plan_sop_uid in plan_set[patient_ser]["RTPLAN"]:
-		patient_id = conquest_interface.get_patient_id_from_plan_sop_uid(plan_sop_uid)
+	for plan_sop_uid in plan_set[patient_ser]["PlanSet"]:
+		patient_id = conquest_db_interface.get_patient_id_from_plan_sop_uid(conquest_aria_engine, plan_sop_uid)
 		if patient_id:
 			break
 
 	if patient_id and patient_id in transmitted:
-		print("Found patient in MEDFYSHUS6666-2 database")
-		continue
+		# print(f"Found patient in {config.conquest_aria.dicom.aet} database")
+		# continue
+		pass
 
-	for plan_sop_uid in plan_set[patient_ser]["RTPLAN"]:
+	for plan_sop_uid in plan_set[patient_ser]["PlanSet"]:
 		# Move the treated RT Plans to Conquest
-		print("Moving plan with SOP UID ", plan_sop_uid)
 
-		assoc = aria_dicom_interface.get_assoc()
-		aria_dicom_interface.c_move_image(assoc, plan_sop_uid)
-		assoc.release()
+		# Check if any of the RT PLAN or RT DOSE files are missing
+		uids = [plan_sop_uid]
+		for dose_uid in list(plan_set[patient_ser]["PlanSet"][plan_sop_uid]["RTDOSE"]):
+			uids.append(dose_uid)
 
-		# Download the structure sets
-		structure_sets, plan_label = conquest_interface.get_rt_struct_uid(plan_sop_uid)
+		uids_exist = { uid: conquest_db_interface.check_exists_sop(conquest_aria_engine, uid) for uid in uids}
 
-		plan_set[patient_ser]["RTPlanLabel"].add(plan_label)
-
-		for instance_uid in structure_sets:
-			plan_set[patient_ser]["RTSTRUCT"].add(instance_uid)
-			print(f"Moving structure set Instance UID {instance_uid}")
-
+		# Keep single association if any of the files are missing
+		if not all(uids_exist.values()):
 			assoc = aria_dicom_interface.get_assoc()
-			aria_dicom_interface.c_move_image(assoc, instance_uid)
+			for uid, status in uids_exist.items():
+				if not status:
+					print("- Moving RT Plan / Dose with SOP UID", uid)
+					aria_dicom_interface.c_move_image(assoc, uid)
 			assoc.release()
 
+		# Find the structure set UIDs + plan labels from the RT Plan file
+		structure_set_uids, plan_label = conquest_db_interface.get_rt_struct_uid(conquest_aria_engine, plan_sop_uid)
+
+		plan_set[patient_ser]["PlanSet"][plan_sop_uid]["RTPlanLabel"] = plan_label
+
+		for instance_uid in structure_set_uids:
+			plan_set[patient_ser]["PlanSet"][plan_sop_uid]["RTSTRUCT"].add(instance_uid)
+
+			if not conquest_db_interface.check_exists_sop(conquest_aria_engine, instance_uid):
+				print(f"- Moving structure set Instance UID {instance_uid}")
+				assoc = aria_dicom_interface.get_assoc()
+				aria_dicom_interface.c_move_image(assoc, instance_uid)
+				assoc.release()
+
 		# Download the associated CT
-		for instance_uid in structure_sets:
-			ct_series_uid_list = conquest_interface.find_referenced_ct_series(instance_uid)
+		for instance_uid in structure_set_uids:
+			ct_series_uid_list = conquest_db_interface.find_referenced_ct_series(conquest_aria_engine, instance_uid)
 			for ct_series_uid in ct_series_uid_list:
-				plan_set[patient_ser]["CT"].add(ct_series_uid)
+				plan_set[patient_ser]["PlanSet"][plan_sop_uid]["CT"].add(ct_series_uid)
 
-				assoc = aria_dicom_interface.get_assoc()
-				aria_dicom_interface.c_move_series(assoc, ct_series_uid)
-				assoc.release()
+				if not conquest_db_interface.check_exists_series(conquest_aria_engine, ct_series_uid):
+					print(f"- Moving CT Series with Series UID", ct_series_uid)
+					assoc = aria_dicom_interface.get_assoc()
+					aria_dicom_interface.c_move_series(assoc, ct_series_uid)
+					assoc.release()
 
-	# Build the complete study tree (also untreated plans)
-	for plan_sop_uid in plan_set[patient_ser]["RTPLAN"]:
-		assoc = aria_dicom_interface.get_assoc()
-		result_set = conquest_interface.get_study_uid_from_plan_sop_uid(assoc, plan_sop_uid)
-		if not len(result_set):
-			continue
-
-		study_uid = result_set[0]["StudyInstanceUID"]
-
-		study_tree = aria_dicom_interface.c_find_study(assoc, study_uid)
-		assoc.release()
-
-		break
-	
-	print("Found ", len(study_tree), " series in the Study tree")
-
-	# Download all RT DOSE objects
-	all_dose_series_uid = list()
-	for series in study_tree:
-		if series.get("Modality") == "RTDOSE":
-			rt_dose_uid = series.get("SeriesInstanceUID")
-			all_dose_series_uid.append(rt_dose_uid)
-
-			try:
-				assoc = aria_dicom_interface.get_assoc()
-				aria_dicom_interface.c_move_series(assoc, rt_dose_uid)
-				assoc.release()
-			except Exception as e:
-				print(f"Could not move RT DOSE series with UID {rt_dose_uid = }... Skipping")
-
-	rtdose_summary = dicom_db_interface.check_rtdose_beam_or_plansum(all_dose_series_uid)
-
-	# Identify the connected RT Plan file UID for each RT Dose
-	for rtdose_object in rtdose_summary:
-		if not plan_set[patient_ser]["PatientID"]:
-			plan_set[patient_ser]["PatientID"] = rtdose_object.get("PatientID")
-
-		if rtdose_object.get("DoseSummationType") == "BEAM":
-			continue
-
-		rtdose_sop_instance_uid = rtdose_object.get("SOPInstanceUID")
-
-		referenced_plan_instance_uids = rtdose_object.get("ReferencedRTlanSOPInstanceUID")
-
-		for plan_uid in referenced_plan_instance_uids:
-			if plan_uid in plan_set[patient_ser]["RTPLAN"]:
-				plan_set[patient_ser]["RTDOSE"].add(rtdose_sop_instance_uid)
-
-	plans_nb = len(plan_set[patient_ser]["RTPLAN"])
-	rtdose_nb = len(plan_set[patient_ser]["RTDOSE"])
-
-	print(f"Identified {rtdose_nb} dose object connected to {plans_nb} plans.")
-
-	conquest_dicom_interface.c_move_to_medfys2(plan_set[patient_ser])
+	conquest_dicom_interface.c_move_to_medfys2(conquest_krest_engine, plan_set[patient_ser])
 	conquest_dicom_interface.c_move_to_krest_hus(plan_set[patient_ser].get("PatientID"))
 	
-	log_database.add_patient(patient_ser, plan_set[patient_ser])
+	if not sent_dt:
+		log_database.add_patient(patient_ser, plan_set[patient_ser])
 
 log_database.save()
+
+n_dose = 0
+n_plan = 0
+n_dose_transmitted = 0
+n_plan_transmitted = 0
+
+for patient_ser in plan_set:
+	for plan_uid in plan_set[patient_ser]["PlanSet"]:
+		n_plan += 1
+		if conquest_db_interface.check_exists_sop(conquest_aria_engine, plan_uid):
+			n_plan_transmitted += 1
+		for dose_uid in plan_set[patient_ser]["PlanSet"][plan_uid]["RTDOSE"]:
+			n_dose += 1
+			if not conquest_db_interface.check_exists_sop(conquest_aria_engine, dose_uid):
+				print("CANNOT FIND RT DOSE FILE WITH UID", dose_uid)
+			else:
+				n_dose_transmitted += 1
+
+print()
+print(f"{n_plan = }; {n_plan_transmitted = }")
+print(f"{n_dose = }; {n_dose_transmitted = }")

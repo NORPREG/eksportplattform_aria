@@ -22,36 +22,30 @@ from pynetdicom.sop_class import (
 	RTPlanStorage
 )
 
-from module.interfaces import aria_db_interface
-
 from pydicom.dataset import Dataset
-from dataclass.conquest_dataclass import (
-	DICOMPatients,
-	DICOMImages,
-	DICOMSeries,
-	DICOMStudies
+from sqlmodel import create_engine, Session, select, exists
+from config import Config
+
+from module.Interfaces import (
+	aria_db_interface,
 )
 
-from sqlmodel import create_engine, Session, select, exists
-
+# debug_logger()
 
 logger = logging.getLogger(__name__)
+config = Config()
 
-fn = os.path.join(os.path.dirname(__file__), 'config/config.toml')
-with open(fn, 'rb') as f:
-    config = tomllib.load(f)
-
-engine = create_engine(config["aria"]["sql"]["uri"])
+engine = create_engine(config.aria.sql.uri)
 
 def get_assoc():
-	ae = AE(ae_title=config["conquest"]["1"]["aet"])
+	ae = AE(ae_title=config.conquest_aria.dicom.aet)
 	ae.add_requested_context(PatientRootQueryRetrieveInformationModelMove)
 	ae.add_requested_context(PatientRootQueryRetrieveInformationModelFind)
 
 	assoc = ae.associate(
-		config["aria"]["dicom"]["server"],
-		config["aria"]["dicom"]["port"],
-		ae_title=config["aria"]["dicom"]["aet"]
+		config.aria.dicom.server,
+		config.aria.dicom.port,
+		ae_title=config.aria.dicom.aet
 	)
 
 	if not assoc.is_established:
@@ -60,16 +54,13 @@ def get_assoc():
 	return assoc
 
 def c_move_image(association, uid):
-	if conquest_db_interface.check_exists_sop(uid):
-		return
-
 	ds = Dataset()
 	ds.QueryRetrieveLevel = "IMAGE"
 	ds.SOPInstanceUID = uid
 
-	responses = assoc.send_c_move(
+	responses = association.send_c_move(
 		ds,
-		move_aet=config["conquest"]["1"]["aet"],
+		move_aet=config.conquest_aria.dicom.aet,
 		query_model=PatientRootQueryRetrieveInformationModelMove
 	)
 
@@ -80,16 +71,13 @@ def c_move_image(association, uid):
 			print("[GET] Connection timed out")
 
 def c_move_series(association, uid):
-	if conquest_db_interface.check_exists_series(uid):
-		return
-
 	ds = Dataset()
 	ds.QueryRetrieveLevel = "SERIES"
 	ds.SeriesInstanceUID = uid
 
-	responses = assoc.send_c_move(
+	responses = association.send_c_move(
 		ds,
-		move_aet=config["conquest"]["1"]["aet"],
+		move_aet=config.conquest_aria.dicom.aet,
 		query_model=PatientRootQueryRetrieveInformationModelMove
 	)
 
@@ -108,7 +96,7 @@ def c_find_study(association, uid):
 
 	result = list()
 
-	responses = assoc.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
+	responses = association.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
 
 	for status, identifier in responses:
 		if status and status.Status in (0xFF00, 0xFF01):
@@ -121,7 +109,7 @@ def c_find_study(association, uid):
 
 	return result
 
-def get_study_uid_from_plan_sop_uid(assoc, plan_sop_uid):
+def get_study_uid_from_plan_sop_uid(association, plan_sop_uid):
 	ds = Dataset()
 	ds.QueryRetrieveLevel = "IMAGE"
 	ds.SOPInstanceUID = plan_sop_uid
@@ -131,7 +119,7 @@ def get_study_uid_from_plan_sop_uid(assoc, plan_sop_uid):
 
 	result = list()
 
-	responses = assoc.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
+	responses = association.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
 
 	for status, identifier in responses:
 		if status and status.Status in (0xFF00, 0xFF01):

@@ -3,9 +3,14 @@ import logging
 from configparser import ConfigParser
 import shlex
 import subprocess
+from sqlmodel import Session, create_engine, select
+import pydicom
 
-from module.dataclass.conquest_dataclass import (
+
+
+from module.Dataclasses.conquest_dataclass import (
 	DICOMImages, 
+	DICOMSeries,
 	DICOMPatients,
 )
 from sqlmodel import select
@@ -17,10 +22,21 @@ config = Config()
 
 logger = logging.getLogger(__name__ + f" (config.HF)")
 
-
 # Conquest SQL Interface | Datamodel
 
-def check_rtdose_beam_or_plansum(rtdose_series_uid_list):
+def get_patient_ids(engine):
+	patient_ids = list()
+
+	with Session(engine) as session:
+		statement = select(DICOMPatients)
+		results = session.exec(statement).all()
+
+		for result in results:
+			patient_ids.append(result.PatientID)
+
+	return patient_ids
+
+def check_rtdose_beam_or_plansum(engine, rtdose_series_uid_list):
 	rtdose_files = list()
 	rtdose_output = list()
 
@@ -30,7 +46,7 @@ def check_rtdose_beam_or_plansum(rtdose_series_uid_list):
 			results = session.exec(statement).all()
 
 			for result in results:
-				rtdose_files.append(ROOT_DIR + result.ObjectFile)
+				rtdose_files.append(config.conquest_aria.root_dir + result.ObjectFile)
 
 	for f in rtdose_files:
 		ds = pydicom.dcmread(f, stop_before_pixels=True)
@@ -45,12 +61,12 @@ def check_rtdose_beam_or_plansum(rtdose_series_uid_list):
 
 	return rtdose_output
 
-def get_rt_struct_uid(plan_sop_uid):
+def get_rt_struct_uid(engine, plan_sop_uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == plan_sop_uid)
 		result = session.exec(statement)
 		try:
-			ds_path = ROOT_DIR + result.one().ObjectFile
+			ds_path = config.conquest_aria.root_dir + result.one().ObjectFile
 		except Exception as e:
 			print("Cannot find structure files! ", e)
 			return list()
@@ -66,7 +82,7 @@ def get_rt_struct_uid(plan_sop_uid):
 	return structure_sets, ds.get("RTPlanLabel")
 
 
-def get_patient_id_from_plan_sop_uid(plan_sop_uid: str) -> str:
+def get_patient_id_from_plan_sop_uid(engine, plan_sop_uid: str) -> str:
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == plan_sop_uid)
 		result = session.exec(statement).all()
@@ -77,12 +93,12 @@ def get_patient_id_from_plan_sop_uid(plan_sop_uid: str) -> str:
 		return result[0].ImagePat
 
 
-def find_referenced_ct_series(rtstruct_instance_uid):
+def find_referenced_ct_series(engine, rtstruct_instance_uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == rtstruct_instance_uid)
 		result = session.exec(statement)
 		try:
-			ds_path = ROOT_DIR + result.one().ObjectFile
+			ds_path = config.conquest_aria.root_dir + result.one().ObjectFile
 		except Exception as e:
 			print("Cannot find CT series: ", e)
 			return None
@@ -100,12 +116,12 @@ def find_referenced_ct_series(rtstruct_instance_uid):
 
 	return ct_series_uid
 
-def find_referenced_plan_uid_from_rt_dose_sql(rt_dose_uid):
+def find_referenced_plan_uid_from_rt_dose_sql(engine, rt_dose_uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SeriesInst == rt_dose_uid)
 		result = session.exec(statement)
 		try:
-			ds_path = ROOT_DIR + result.one().ObjectFile
+			ds_path = config.conquest_aria.root_dir + result.one().ObjectFile
 		except:
 			return list()
 
@@ -120,7 +136,7 @@ def find_referenced_plan_uid_from_rt_dose_sql(rt_dose_uid):
 
 	return plan_uid
 
-def check_exists_sop(uid):
+def check_exists_sop(engine, uid):
 	with Session(engine) as session:
 		statement = select(DICOMImages).where(DICOMImages.SOPInstanceUID == uid)
 		result = session.exec(statement)
@@ -129,7 +145,7 @@ def check_exists_sop(uid):
 	
 	return False
 
-def check_exists_series(uid):	
+def check_exists_series(engine, uid):	
 	with Session(engine) as session:
 		statement = select(DICOMSeries).where(DICOMSeries.SeriesInstanceUID == uid)
 		result = session.exec(statement)
