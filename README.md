@@ -156,9 +156,12 @@ ARIA → C-MOVE → Conquest
 Når alle nødvendige objekter finnes:
 
 ```
-Conquest → Medfys
-Conquest → KRESt-HUS
+Conquest (Medfys-1) → Conquest (Medfys-2)
+Conquest (Medfys-2) → KREST-HUS
 ```
+
+Merk at det her benyttes to Conquest-instanser. Det er fordi ulike port-rekkevidder måtte benyttes mot Aria (via "medfys-1") og KREST-HUS (via "medfys-2").
+Derfor må dataene først flyttes fra "medfys-1" til "medfys-2" før de kan overføres til KREST-HUS, da via en C-MOVE.
 
 Dette gjøres via:
 
